@@ -1,0 +1,96 @@
+# This is an example configuration file for device mapper multipath.
+# For a complete list of the default configuration values, see
+# /usr/share/doc/device-mapper-multipath-0.4.5/multipath.conf.defaults
+
+# Blacklist local SCSI disks
+blacklist {
+	device {
+		vendor "FUJITSU"
+		product "MAX3073RC"
+	}
+        #devnode "*"
+}
+
+# We do *not* want user friendly names. We will explicitly list/name
+# the volumes below. We want any bare WWIDs to stand out.
+defaults {
+	user_friendly_names no
+# Don't give up and crash volumes until 3000*number of paths seconds.
+        polling_interval 10
+        no_path_retry 300
+# Wait 2 seconds before starting to reuse a path that fails/recovers.
+        failback 2
+# Group by weight, using a script that gives FC paths higher priority
+# than iSCSI. multipath -ll will look like this:
+#     gilead (36000d3100008f20000000000000001d1) dm-7 COMPELNT,Compellent Vol
+#     [size=32G][features=1 queue_if_no_path][hwhandler=0]
+#     \_ round-robin 0 [prio=100][enabled]
+#      \_ 1:0:1:20 sdah 66:16   [active][ready]
+#      \_ 2:0:1:20 sdap 66:144  [active][ready]
+#     \_ round-robin 0 [prio=20][enabled]
+#      \_ 3:0:0:20 sdct 70:16   [active][ready]
+#      \_ 4:0:0:20 sddl 71:48   [active][ready]
+# In the above example, we will round-robin I/Os across the FC paths
+# sdah and sdap unless both of those paths fail, in which case we
+# fail over to the iSCSI paths sdct and sddl.
+	path_grouping_policy group_by_prio
+	rr_weight priorities
+	prio_callout    "/usr/local/sbin/prio_compellent.pl /dev/%n"
+}
+# Give consistent names. Devices will show up as /dev/mapper/aleppo,
+# with partitions /dev/mapper/aleppop1, /dev/mapper/aleppop2, etc.
+#
+# The WWID can be obtained from the properties pane in the Compellent
+# web interface.
+multipaths {
+	multipath {
+		wwid			36000d3100008f2000000000000000356
+		alias			aleppo
+	}
+        multipath {
+                wwid                    36000d3100008f2000000000000000a3a
+                alias                   dc2tst
+        }
+        multipath {
+                wwid                    36000d3100008f2000000000000000b02
+                alias                   dc1tst
+        }
+	multipath {
+		wwid			36000d3100008f20000000000000003cf
+		alias			algiers
+	}
+        multipath {
+                wwid                    36000d3100008f2000000000000000397
+                alias                   algiers_local
+        }
+        multipath {
+                wwid                    36000d3100008f200000000000000004b
+                alias                   chicago
+        }
+        multipath {
+                wwid                    36000d3100008f200000000000000004c
+                alias                   chicago_mysql
+        }
+        multipath {
+                wwid                    36000d3100008f200000000000000004d
+                alias                   chicago_local
+        }
+        multipath {
+                wwid                    36000d3100008f200000000000000004e
+                alias                   chicago_assets
+        }
+# It's nice to have install disk ISO images in the SAN. They can be mounted
+# read-only in as many places as needed.
+	multipath {
+		wwid			36000d3100008f20000000000000001f4
+		alias			dvd-rhel5-2-64
+	}
+	multipath {
+		wwid			36000d3100008f20000000000000001f6
+		alias			dvd-rhel5-2-32
+	}
+	multipath {
+		wwid			36000d3100008f20000000000000003e2	
+		alias			dvd-rhel4-7-32
+	}
+}
