@@ -291,7 +291,7 @@ multipaths_section:
 multipath_section:
         MULTIPATH^
         '{'
-        wwid
+        wwid?
         (
             alias
         |   path_grouping_policy
