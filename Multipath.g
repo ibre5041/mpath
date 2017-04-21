@@ -153,7 +153,7 @@ log_checker_err: LOG_CHECKER_ERR^ IDENTIFIER;
 
 // blacklist section
 WWID: 'wwid';
-wwid: WWID^ (IDENTIFIER | STRING | HEXNUM);
+wwid: WWID^ (IDENTIFIER | STRING | HEXNUM | NUMBER);
 
 // Regular expression of the device nodes to be excluded.
 DEVNODE: 'devnode';
