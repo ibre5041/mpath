@@ -38,10 +38,14 @@ alias %s%s
 """ % (self.wwid, self.alias, self.additional if self.additional else '')
 
     def __lt__(self, other):
-        #return self.getWWID() < other.getWWID()
-        return self.alias < other.alias
+        if self.alias.startswith('local') and other.alias.startswith('asm'):
+            return True
+        if other.alias.startswith('local') and self.alias.startswith('asm'):
+            return False
+        return self.getWWID() < other.getWWID()
+        #return self.alias < other.alias
 
-def parse(filename):
+def parseMultipathConf(filename):
     lines = [line.rstrip('\n') for line in open(filename)]
     #
     input = ANTLRFileStream(filename)
@@ -72,8 +76,8 @@ def parse(filename):
                     
     for line in lines[stopToken.line:] :
         print line
-
-    #return t.toStringTree()
+        
+    return M
     
 if __name__ == "__main__" and len(sys.argv) >= 2:
-    print parse(str(sys.argv[1]))
+    print parseMultipathConf(str(sys.argv[1]))
