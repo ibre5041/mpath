@@ -1,4 +1,5 @@
 .project
 .pydevproject
+multipath.conf.*
+xpinfo.xml.*
 
-		
