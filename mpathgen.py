@@ -4,8 +4,9 @@ from antlr3.tree import *;
 import MultipathLexer
 import MultipathParser
 import sys
-
+import re
 import unittest
+import math
 
 class MultipathDevice:
     def __init__(self, elem):
@@ -28,6 +29,9 @@ class MultipathDevice:
     # generate WWID in Linux multipath.conf format        
         return self.wwid
         
+    def getAlias(self):
+        return self.alias
+
     def getComment(self):
         return ''
 
@@ -122,6 +126,8 @@ class XmlDevice:
         return self.getComment()           
 
     def __lt__(self, other):
+        if self.serialNrHex < other.serialNrHex:
+            return True
         if self.lunId < other.lunId:
             return True
         if self.lunId == other.lunId:
@@ -141,9 +147,61 @@ def parseXPinfo(filename):
         print(device)
     return L
 
+def nextAliasNumber(AliasList, n):
+    Aliases = filter(lambda a: not re.match("^local", a) , AliasList)
+    LastAlias = max(Aliases)
+    aliasRe = re.compile(r'^([a-zA-Z]+)([0-9]+)')
+    reSult =aliasRe.search(LastAlias);
+    aliasPrefix, aliasSuffix = reSult.groups();
+    # aliasNumner = 32, resp. 91, resp 450
+    aliasNumber = int(aliasSuffix)
+    # scale = 1, resp 1, resp 2
+    scale = int(math.floor(math.log10(aliasNumber)))
+    # scalePow = 10, resp 10, resp 100
+    scalePow = int(math.pow(10, scale))
+    # leadingDigit 3, resp 9, resp 4
+    leadingDigit = int(math.floor(aliasNumber / scalePow))
+    if leadingDigit == 9:
+        leadingDigit = 1
+        scale += 1
+        scalePow = int(math.pow(10, scale))
+        leadingDigit = 1
+    else:
+        leadingDigit += 1
+
+    R = []
+    zfilllen = max([scale+2, len(aliasSuffix)])    
+    for i in range(1,n):
+        alias = aliasPrefix + str(scalePow * leadingDigit + i).zfill(zfilllen)
+        R.append(alias)        
+    return R
+    
 if __name__ == "__main__" and len(sys.argv) >= 3:
-    M = parseMultipathConf(str(sys.argv[1]))
-    L = parseXPinfo(str(sys.argv[2]))
-    MW = set(map(lambda m: m.getWWID(), M))
-    MF = filter(lambda m: m.getWWID() not in MW, L)
-    print len(MF)
+    MPathList = parseMultipathConf(str(sys.argv[1]))
+    XPinfList = parseXPinfo(str(sys.argv[2]))
+    # Get WWIDs from /etc/multipath.conf
+    MPathWWIDs = set(map(lambda m: m.getWWID(), MPathList))
+    # Get WWIDs from xpinfo output but not in /etc/multipath.conf
+    XPinfWWIDs = set(map(lambda m: m.getWWID(), XPinfList))
+    #    
+    MissingWWIDs = set(filter(lambda m: m not in MPathWWIDs, XPinfWWIDs))
+    #
+    print "mpath: " + str(len(MPathWWIDs))
+    for W in MPathWWIDs:
+        print W
+
+    print "xpinfo: "  + str(len(XPinfWWIDs))
+    for W in XPinfWWIDs:
+        print W 
+
+    print "missing: " + str(len(MissingWWIDs))
+    for W in MissingWWIDs:
+        print W
+    
+    
+    NewAliases = nextAliasNumber(map(lambda m: m.getAlias(), MPathList), len(MissingWWIDs))
+    print NewAliases
+    
+    
+
+    
