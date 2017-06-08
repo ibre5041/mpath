@@ -150,7 +150,7 @@ class XmlDevice:
         self.size  = elem.getElementsByTagName('array_storage')[0].getElementsByTagName('ldev')[0].getElementsByTagName('size')[0].firstChild.nodeValue
         self.size  = int(self.size)    
         #
-        self.comment = "# Path: {} \t FcLunId: {}\t OUI: {}\t LUN: {:02d}\t Port: {}\t SN: {}/{}\t Size: {: 8d}"\
+        self.comment = "# Path: {0} \t FcLunId: {1}\t OUI: {2}\t LUN: {3:02d}\t Port: {4}\t SN: {5}/{6}\t Size: {7: 8d}"\
             .format(self.path, self.fcLunId ,self.vendorOui, self.lunId, self.port, self.serialNrHex, self.serialNrDec, self.size)
 
     def getWWID(self):
@@ -270,7 +270,7 @@ if __name__ == "__main__" and len(sys.argv) >= 3:
         else:
             alias = newAliases.pop(0)
             comment = xpinfo.getDeviceByWWID(W).getComment()        
-            print >> sys.stderr, "Adding: {} \t {}".format(alias, W)
+            print >> sys.stderr, "Adding: {0} \t {1}".format(alias, W)
             multipathConf.addMultipath(MultipathDevice(comment, alias, W))
     # serialiaze a new config file 
     multipathConf.serialize()
