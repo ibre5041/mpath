@@ -9,22 +9,31 @@ import unittest
 import math
 
 class MultipathDevice:
-    def __init__(self, elem):
+    def __init__(self, comment, alias, wwid, additional = ''):
+        self.comment = comment
+        self.alias = alias
+        self.wwid = wwid
+        self.additional = additional
+        
+    @classmethod
+    def fromASTToken(cls, elem):
         #
-        self.additional = ''
+        additional = ''
         for e in elem.children:
             if e.toString() == '{':
                 continue
             elif e.toString() == 'wwid':
-                self.wwid = e.children[0].text
+                wwid = e.children[0].text
             elif e.toString() == 'alias':
-                self.alias = e.children[0].text
+                alias = e.children[0].text
             elif e.toString() == '}':
                 continue
             else:
-                self.additional += "\n"                
-                self.additional += e.toString()
-                self.additional += " " + e.children[0].text if e.children else None
+                additional += "\n"                
+                additional += e.toString()
+                additional += " " + e.children[0].text if e.children else None
+        return cls('', alias, wwid, additional)
+
     def getWWID(self):
     # generate WWID in Linux multipath.conf format        
         return self.wwid
@@ -33,56 +42,83 @@ class MultipathDevice:
         return self.alias
 
     def getComment(self):
-        return ''
+        return self.comment
 
     def __str__(self):
         return """multipath {
+%s
 wwid %s
 alias %s%s
 }
-""" % (self.wwid, self.alias, self.additional if self.additional else '')
+""" % (self.comment, self.wwid, self.alias, self.additional if self.additional else '')
 
     def __lt__(self, other):
+        # local disks before shared ones
         if self.alias.startswith('local') and other.alias.startswith('asm'):
             return True
         if other.alias.startswith('local') and self.alias.startswith('asm'):
             return False
-        return self.getWWID() < other.getWWID()
+        return self.getAlias() < other.getAlias()
         #return self.alias < other.alias
 
-def parseMultipathConf(filename):
-    lines = [line.rstrip('\n') for line in open(filename)]
-    #
-    input = ANTLRFileStream(filename)
-    lexer = MultipathLexer.MultipathLexer(input);
-    tokens = CommonTokenStream(lexer);
-    parser = MultipathParser.MultipathParser(tokens);
-    r = parser.multipath();
-    t = r.tree; # get tree from parser
-    #
-    multipaths = [ a for a in t.children if a.token.text == 'multipaths' ] # filter tree children, find those named 'multipaths' (assuming there is only one)
-    #
-    startToken = tokens.get(multipaths[0].startIndex)
-    stopToken  = tokens.get(multipaths[0].stopIndex)
-    #
-    for line in lines[0: startToken.line -1 ] : # antlr3 indexes lines from 1
-        print line
-
-    print 'multipaths {'
-    M = []
-    for multipath in multipaths[0].children:
-        if multipath.toString() != 'multipath': # leading '{' and trailing '}' are also children of multipaths element 
-            continue
-        M.append(MultipathDevice(multipath))
-    M.sort()
-    for multipath in M:
-        print(multipath)
-    print '}'
-                    
-    for line in lines[stopToken.line:] :
-        print line
+class MultipathConf:
+    def __init__(self, filename):
+        self.lines = [line.rstrip('\n') for line in open(filename)]
+        #
+        inputStream = ANTLRFileStream(filename)
+        lexer = MultipathLexer.MultipathLexer(inputStream);
+        tokens = CommonTokenStream(lexer);
+        parser = MultipathParser.MultipathParser(tokens);
+        r = parser.multipath();
+        self.tree = r.tree; # get tree from parser
+        #
+        self.mpathsSection = [ a for a in self.tree.children if a.token.text == 'multipaths' ] # filter tree children, find those named 'multipaths' (assuming there is only one)
+        #
+        self.mpathsSectionStart = tokens.get(self.mpathsSection[0].startIndex)
+        self.mpathsSectionStop  = tokens.get(self.mpathsSection[0].stopIndex)
+        #
+        self.mpaths = []
+        self.mpathsHashByWWID = {}
+        self.mpathsHashByAlias = {}
+        for mpath in self.mpathsSection[0].children:
+            if mpath.toString() != 'multipath': # leading '{' and trailing '}' are also children of multipaths element 
+                continue
+            device = MultipathDevice.fromASTToken(mpath)
+            self.mpaths.append(device)
+            self.mpathsHashByWWID[device.getWWID()] = device
+            self.mpathsHashByAlias[device.getAlias()] = device
+        self.mpaths.sort()
         
-    return M
+    def multipaths(self):
+        return self.mpaths
+        
+    def getMultipathByWWID(self, wwid):
+        return self.mpathsHashByWWID[wwid]
+        
+    def getMultipathByAlias(self, alias): 
+        return self.mpathsHashByAlias[alias]
+        
+    def getWWIDs(self):
+        return set(map(lambda m: m.getWWID(), self.mpaths))
+    
+    def addMultipath(self, multipath):
+        self.mpaths.append(multipath)
+        self.mpathsHashByWWID[multipath.getWWID()] = multipath
+        self.mpathsHashByAlias[multipath.getAlias()] = multipath
+    
+    def serialize(self):
+        # Copy heading sections line by line, until multipaths section start
+        for line in self.lines[0: self.mpathsSectionStart.line -1 ] : # antlr3 indexes lines from 1
+            print line
+        # Serialize current lultipaths list
+        # self.mpaths.sort()
+        print 'multipaths {'
+        for multipath in self.mpaths:
+            print(multipath)
+        print '}'
+        # Copy trailing line one by one - if any
+        for line in self.lines[self.mpathsSectionStop.line:] :
+            print line        
 
 class XmlDevice:
     def __init__(self, elem):
@@ -113,39 +149,64 @@ class XmlDevice:
         #
         self.size  = elem.getElementsByTagName('array_storage')[0].getElementsByTagName('ldev')[0].getElementsByTagName('size')[0].firstChild.nodeValue
         self.size  = int(self.size)    
+        #
+        self.comment = "# Path: {} \t FcLunId: {}\t OUI: {}\t LUN: {:02d}\t Port: {}\t SN: {}/{}\t Size: {: 8d}"\
+            .format(self.path, self.fcLunId ,self.vendorOui, self.lunId, self.port, self.serialNrHex, self.serialNrDec, self.size)
 
     def getWWID(self):
     # generate WWID in Linux multipath.conf format        
         return '3' + '6' + self.vendorOui + self.serialNrHex + self.fcLunId;
         
     def getComment(self):
-        return "# Path: {} \t FcLunId: {}\t OUI: {}\t LUN: {:02d}\t Port: {}\t SN: {}/{}\t Size: {: 8d}\t {}"\
-            .format(self.path, self.fcLunId ,self.vendorOui, self.lunId, self.port, self.serialNrHex, self.serialNrDec, self.size, self.getWWID())
+        return self.comment
                                
     def __str__(self):
         return self.getComment()           
 
     def __lt__(self, other):
-        if self.serialNrHex < other.serialNrHex:
-            return True
-        if self.lunId < other.lunId:
-            return True
-        if self.lunId == other.lunId:
+        # 1st compare serial numbers
+        if self.serialNrHex != other.serialNrHex:
+            return self.serialNrHex < other.serialNrHex
+        # 2nd compare LUN IDs 
+        if self.lunId != other.lunId:
+            return self.lunId < other.lunId
+        # 3rd should be reaches        
+        if self.getWWID() != other.getWWID():
             return self.getWWID() < other.getWWID()
-        return False
-    
-def parseXPinfo(filename):
-    xmldoc = minidom.parse(filename)
-    itemlist = xmldoc.getElementsByTagName('device_file')
-    #print('Total devices: '+len(itemlist))
-    L = []
-    for s in itemlist:
-        xmlDevice = XmlDevice(s)
-        L.append(xmlDevice)        
-    L.sort()   
-    for device in L:   
-        print(device)
-    return L
+        # 4th sort lexically by comment (path)
+        return self.getComment() < other.getComment()
+
+class XPinfo:
+    def __init__(self, filename):
+        xmldoc = minidom.parse(filename)
+        self.itemlist = xmldoc.getElementsByTagName('device_file')
+        # This list contains duplicates, one per path
+        self.L = []
+        for s in self.itemlist: 
+            self.L.append(XmlDevice(s))
+        self.L.sort()
+        # Put all wwids into hash map, if wwid is already present just concat comments
+        self.M = {}
+        for device in self.L:
+            if device.getWWID() in self.M:
+                d = self.M[device.getWWID()]
+                d.comment += "\n" + device.comment
+            else:        
+                self.M[device.getWWID()] = device
+        # Final sorted list
+        self.N = []
+        for wwid in list(self.M.keys()):
+            self.N.append(self.M[wwid])
+        self.N.sort()
+
+    def devices(self):
+        return self.N
+
+    def getDeviceByWWID(self, wwid):
+        return self.M[wwid]
+
+    def getWWIDs(self):
+        return map(lambda m: m.getWWID(), self.N)
 
 def nextAliasNumber(AliasList, n):
     Aliases = filter(lambda a: not re.match("^local", a) , AliasList)
@@ -171,37 +232,45 @@ def nextAliasNumber(AliasList, n):
 
     R = []
     zfilllen = max([scale+2, len(aliasSuffix)])    
-    for i in range(1,n):
+    for i in range(0,n):
+        # alias = 40, resp 100, resp 500
         alias = aliasPrefix + str(scalePow * leadingDigit + i).zfill(zfilllen)
         R.append(alias)        
     return R
     
 if __name__ == "__main__" and len(sys.argv) >= 3:
-    MPathList = parseMultipathConf(str(sys.argv[1]))
-    XPinfList = parseXPinfo(str(sys.argv[2]))
+    multipathConf = MultipathConf(str(sys.argv[1]))
+    xpinfo = XPinfo(str(sys.argv[2]))
     # Get WWIDs from /etc/multipath.conf
-    MPathWWIDs = set(map(lambda m: m.getWWID(), MPathList))
+    MPathWWIDs = multipathConf.getWWIDs()
     # Get WWIDs from xpinfo output but not in /etc/multipath.conf
-    XPinfWWIDs = set(map(lambda m: m.getWWID(), XPinfList))
-    #    
-    MissingWWIDs = set(filter(lambda m: m not in MPathWWIDs, XPinfWWIDs))
+    XPinfoWWIDs = xpinfo.getWWIDs() 
+    # 
+    MissingWWIDs = set(filter(lambda m: m not in MPathWWIDs, XPinfoWWIDs))
     #
-    print "mpath: " + str(len(MPathWWIDs))
+    print >> sys.stderr, "mpath: " + str(len(MPathWWIDs))
     for W in MPathWWIDs:
-        print W
+        print >> sys.stderr, W
 
-    print "xpinfo: "  + str(len(XPinfWWIDs))
-    for W in XPinfWWIDs:
-        print W 
+    print >> sys.stderr, "xpinfo: "  + str(len(XPinfoWWIDs))
+    for W in XPinfoWWIDs:
+        print >> sys.stderr, W 
 
-    print "missing: " + str(len(MissingWWIDs))
-    for W in MissingWWIDs:
-        print W
-    
-    
-    NewAliases = nextAliasNumber(map(lambda m: m.getAlias(), MPathList), len(MissingWWIDs))
-    print NewAliases
-    
-    
-
-    
+    print >> sys.stderr, "missing: " + str(len(MissingWWIDs))
+    # generate alias for each missing wwid
+    newAliases = nextAliasNumber(map(lambda m: m.getAlias(), multipathConf.multipaths()), len(MissingWWIDs))
+    # iterate over all xpinfo wwids
+    for W in XPinfoWWIDs:
+        # if it is present just modify its comment
+        if W in MPathWWIDs:
+            multipath = multipathConf.getMultipathByWWID(W)
+            xmldevive = xpinfo.getDeviceByWWID(W)
+            multipath.comment = xmldevive.getComment()
+        # else add a new alias
+        else:
+            alias = newAliases.pop(0)
+            comment = xpinfo.getDeviceByWWID(W).getComment()        
+            print >> sys.stderr, "Adding: {} \t {}".format(alias, W)
+            multipathConf.addMultipath(MultipathDevice(comment, alias, W))
+    # serialiaze a new config file 
+    multipathConf.serialize()
